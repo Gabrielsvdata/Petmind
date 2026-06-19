@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: petmind
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: petmind-db
+          property: connectionString
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+
+databases:
+  - name: petmind-db
+    databaseName: petmind
+    user: petmind
+    plan: free
