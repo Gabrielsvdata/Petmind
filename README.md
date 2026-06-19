@@ -80,6 +80,28 @@ python -m pytest                 # Testes
 
 ---
 
+## Migrations (Alembic)
+
+Usar Alembic para versionamento seguro do schema do banco:
+
+```bash
+# Criar nova migration (autogenera mudanças)
+python -m alembic revision --autogenerate -m "descrição"
+
+# Aplicar todas as migrations pendentes
+python -m alembic upgrade head
+
+# Desfazer última migration
+python -m alembic downgrade -1
+
+# Ver histórico de migrations
+python -m alembic history
+```
+
+**Nota:** As migrations são geradas automaticamente ao comparar o schema SQLAlchemy com o banco. Sempre revise a migration gerada antes de aplicar em produção.
+
+---
+
 ## Deploy no Render
 
 ### Pré-requisitos
