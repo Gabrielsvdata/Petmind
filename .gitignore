@@ -15,4 +15,5 @@ venv/
 *.sqlite3
 AGENTS.md
 CLAUDE-backend.md
+PROMPT-backend-fase2.md
 

@@ -75,6 +75,24 @@ class UltimoRegistroResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TendenciasSchema(BaseModel):
+    """Schema para tendências dos indicadores comportamentais."""
+
+    agitacao: str
+    sono: str
+    apetite: str
+    humor: str
+
+
+class MediasSchema(BaseModel):
+    """Schema para médias dos indicadores comportamentais."""
+
+    agitacao: float
+    sono: float
+    apetite: float
+    humor: float
+
+
 class AnaliseComportamentoResponse(BaseModel):
     """Schema de resposta para a análise de comportamento via IA."""
 
@@ -82,5 +100,10 @@ class AnaliseComportamentoResponse(BaseModel):
     nome_pet: str
     especie: str
     total_registros: int
-    estado_emocional_atual: str
-    analise: str
+    estado_predominante: str
+    confianca: int
+    medias: MediasSchema
+    tendencias: TendenciasSchema
+    alertas: list[str]
+    diagnostico: str
+    recomendacao: str

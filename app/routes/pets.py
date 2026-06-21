@@ -5,10 +5,12 @@ from app.database import get_db
 from app.models.pet import Pet, RegistroComportamento
 from app.schemas.pet import (
     AnaliseComportamentoResponse,
+    MediasSchema,
     PetCreate,
     PetResponse,
     RegistroComportamentoCreate,
     RegistroComportamentoResponse,
+    TendenciasSchema,
     UltimoRegistroResponse,
 )
 from app.services.emocao_service import calcular_estado_emocional
@@ -130,7 +132,7 @@ def ultimo_registro(
 def analisar_comportamento(
     pet_id: int, db: Session = Depends(get_db)
 ) -> AnaliseComportamentoResponse:
-    """Analisa o comportamento do pet usando IA e retorna insights."""
+    """Analisa o comportamento do pet usando IA e retorna insights estruturados."""
     pet = db.query(Pet).filter(Pet.id == pet_id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
@@ -138,21 +140,13 @@ def analisar_comportamento(
     registros = (
         db.query(RegistroComportamento)
         .filter(RegistroComportamento.pet_id == pet_id)
-        .order_by(RegistroComportamento.data_hora.desc())
+        .order_by(RegistroComportamento.data_hora.asc())
         .all()
     )
     if not registros:
         raise HTTPException(
             status_code=400, detail="Nenhum registro encontrado para este pet"
         )
-
-    ultimo = registros[0]
-    estado_atual = calcular_estado_emocional(
-        agitacao=ultimo.agitacao,
-        sono=ultimo.sono,
-        apetite=ultimo.apetite,
-        humor=ultimo.humor,
-    )
 
     registros_dict: list[dict[str, object]] = [
         {
@@ -165,18 +159,19 @@ def analisar_comportamento(
         for r in registros
     ]
 
-    servico = GroqService()
-    analise = servico.analisar_comportamento(
-        nome_pet=pet.nome,
-        especie=pet.especie,
-        registros=registros_dict,
-    )
+    service = GroqService()
+    analise = service.analisar_comportamento(pet.nome, pet.especie, registros_dict)
 
     return AnaliseComportamentoResponse(
-        pet_id=pet.id,
+        pet_id=pet_id,
         nome_pet=pet.nome,
         especie=pet.especie,
         total_registros=len(registros),
-        estado_emocional_atual=estado_atual,
-        analise=analise,
+        estado_predominante=str(analise.get("estado_predominante", "feliz")),
+        confianca=int(analise.get("confianca", 70)),  # type: ignore[arg-type]
+        medias=MediasSchema(**analise.get("medias", {})),  # type: ignore[arg-type]
+        tendencias=TendenciasSchema(**analise.get("tendencias", {})),  # type: ignore[arg-type]
+        alertas=list(analise.get("alertas", [])),  # type: ignore[arg-type]
+        diagnostico=str(analise.get("diagnostico", "")),
+        recomendacao=str(analise.get("recomendacao", "")),
     )

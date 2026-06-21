@@ -257,7 +257,15 @@ def test_analisar_comportamento(monkeypatch):
     from app.services import groq_service
 
     def mock_analisar(self, nome_pet, especie, registros):
-        return "Análise simulada: o pet está bem."
+        return {
+            "estado_predominante": "feliz",
+            "confianca": 85,
+            "medias": {"agitacao": 3.0, "sono": 4.0, "apetite": 4.0, "humor": 4.0},
+            "tendencias": {"agitacao": "estável", "sono": "estável", "apetite": "estável", "humor": "estável"},
+            "alertas": [],
+            "diagnostico": "Pet apresenta padrão equilibrado.",
+            "recomendacao": "Continue monitorando diariamente.",
+        }
 
     monkeypatch.setattr(
         groq_service.GroqService, "analisar_comportamento", mock_analisar
@@ -287,8 +295,13 @@ def test_analisar_comportamento(monkeypatch):
     assert dados["nome_pet"] == "Rex"
     assert dados["especie"] == "cachorro"
     assert dados["total_registros"] == 1
-    assert "estado_emocional_atual" in dados
-    assert dados["analise"] == "Análise simulada: o pet está bem."
+    assert dados["estado_predominante"] == "feliz"
+    assert dados["confianca"] == 85
+    assert dados["medias"]["agitacao"] == 3.0
+    assert dados["tendencias"]["sono"] == "estável"
+    assert dados["alertas"] == []
+    assert "diagnostico" in dados
+    assert "recomendacao" in dados
 
 
 def test_analisar_sem_registros():
