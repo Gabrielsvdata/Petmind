@@ -5,6 +5,7 @@ Responsável por analisar comportamentos dos pets usando IA
 e gerar insights sobre padrões e anomalias.
 """
 
+import json
 import os
 
 from dotenv import load_dotenv
@@ -137,7 +138,6 @@ Regras obrigatórias:
             if conteudo.startswith("json"):
                 conteudo = conteudo[4:]
 
-        import json
         try:
             return json.loads(conteudo)  # type: ignore[no-any-return]
         except Exception:
