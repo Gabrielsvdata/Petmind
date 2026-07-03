@@ -7,6 +7,7 @@ e gerar insights sobre padrões e anomalias.
 
 import json
 import os
+import re
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -66,6 +67,42 @@ class GroqService:
             "humor":    tendencia("humor"),
         }
 
+        # Extrai eventos codificados em observacoes no formato EVENTOS:id1,id2
+        eventos_unicos: set[str] = set()
+        for registro in registros:
+            obs = str(registro.get("observacoes", "") or "")
+            match = re.search(r"EVENTOS:([^|]+)", obs)
+            if not match:
+                continue
+            ids = [ev.strip() for ev in match.group(1).split(",") if ev.strip()]
+            eventos_unicos.update(ids)
+
+        contexto_eventos = ""
+        if eventos_unicos:
+            eventos_lista = ", ".join(sorted(eventos_unicos))
+            contexto_eventos = (
+                f"\nEVENTOS DO PERÍODO:\n"
+                f"- Eventos registrados: {eventos_lista}\n"
+            )
+            if "jogo_copa" in eventos_unicos or "torcida_casa" in eventos_unicos:
+                contexto_eventos += (
+                    "- Observação: houve jogos da Copa durante o período analisado.\n"
+                )
+            if "sozinho" in eventos_unicos:
+                contexto_eventos += (
+                    "- Observação: o pet ficou sozinho em alguns momentos.\n"
+                )
+            if any(
+                e in eventos_unicos for e in ["reveillon", "festa_junina", "aniversario"]
+            ):
+                contexto_eventos += (
+                    "- Observação: houve festas e barulho no período.\n"
+                )
+            if "tempestade" in eventos_unicos:
+                contexto_eventos += (
+                    "- Observação: houve tempestade/trovões no período.\n"
+                )
+
         linhas = "\n".join(
             f"Registro {i+1}: agitação={r['agitacao']}, sono={r['sono']}, "
             f"apetite={r['apetite']}, humor={r['humor']}"
@@ -86,6 +123,7 @@ DADOS CALCULADOS:
 
 REGISTROS BRUTOS:
 {linhas}
+{contexto_eventos}
 
 Responda APENAS com um JSON válido, sem texto antes ou depois, sem markdown, sem explicações.
 O JSON deve seguir EXATAMENTE esta estrutura:

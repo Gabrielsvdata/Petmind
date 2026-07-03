@@ -1,9 +1,13 @@
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.user import Usuario
 
 
 class Pet(Base):
@@ -12,6 +16,9 @@ class Pet(Base):
     __tablename__ = "pets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("usuarios.id"), nullable=True, index=True
+    )
     nome: Mapped[str] = mapped_column(String(100), nullable=False)
     raca: Mapped[str] = mapped_column(String(100), nullable=False)
     especie: Mapped[str] = mapped_column(String(20), nullable=False, default="cachorro")
@@ -26,6 +33,7 @@ class Pet(Base):
     registros: Mapped[list["RegistroComportamento"]] = relationship(
         back_populates="pet", cascade="all, delete-orphan"
     )
+    dono: Mapped["Usuario"] = relationship(back_populates="pets")
 
 
 class RegistroComportamento(Base):

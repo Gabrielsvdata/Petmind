@@ -1,15 +1,40 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.database import Base, engine
-from app.routes import pets
+from app.models import pet, user  # noqa: F401
+from app.routes import auth, pets
 
 # Carrega variáveis de ambiente
 load_dotenv()
 
 # Cria as tabelas no banco de dados
 Base.metadata.create_all(bind=engine)
+
+# Compatibilidade com banco antigo sem owner_id
+with engine.connect() as conn:
+    conn.execute(text("ALTER TABLE pets ADD COLUMN IF NOT EXISTS owner_id INTEGER"))
+    conn.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.table_constraints
+                    WHERE constraint_name = 'fk_pets_owner_id_usuarios'
+                ) THEN
+                    ALTER TABLE pets
+                    ADD CONSTRAINT fk_pets_owner_id_usuarios
+                    FOREIGN KEY (owner_id) REFERENCES usuarios(id);
+                END IF;
+            END $$;
+            """
+        )
+    )
+    conn.commit()
 
 # Instância principal da aplicação
 app = FastAPI(
@@ -33,6 +58,7 @@ app.add_middleware(
 )
 
 # Registra os roteadores
+app.include_router(auth.roteador)
 app.include_router(pets.roteador)
 
 

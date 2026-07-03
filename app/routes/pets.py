@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.pet import Pet, RegistroComportamento
+from app.models.user import Usuario
 from app.schemas.pet import (
     AnaliseComportamentoResponse,
     MediasSchema,
@@ -14,6 +15,7 @@ from app.schemas.pet import (
     UltimoRegistroResponse,
 )
 from app.services.emocao_service import calcular_estado_emocional
+from app.services.auth_service import get_usuario_atual
 from app.services.groq_service import GroqService
 
 roteador = APIRouter(prefix="/pets", tags=["pets"])
@@ -23,9 +25,13 @@ roteador = APIRouter(prefix="/pets", tags=["pets"])
 
 
 @roteador.post("/", response_model=PetResponse, status_code=201)
-def cadastrar_pet(pet: PetCreate, db: Session = Depends(get_db)) -> Pet:
+def cadastrar_pet(
+    pet: PetCreate,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
+) -> Pet:
     """Cadastra um novo pet no sistema."""
-    novo_pet = Pet(**pet.model_dump())
+    novo_pet = Pet(**pet.model_dump(), owner_id=usuario.id)
     db.add(novo_pet)
     db.commit()
     db.refresh(novo_pet)
@@ -33,15 +39,22 @@ def cadastrar_pet(pet: PetCreate, db: Session = Depends(get_db)) -> Pet:
 
 
 @roteador.get("/", response_model=list[PetResponse])
-def listar_pets(db: Session = Depends(get_db)) -> list[Pet]:
+def listar_pets(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
+) -> list[Pet]:
     """Lista todos os pets cadastrados."""
-    return db.query(Pet).all()
+    return db.query(Pet).filter(Pet.owner_id == usuario.id).all()
 
 
 @roteador.get("/{pet_id}", response_model=PetResponse)
-def buscar_pet(pet_id: int, db: Session = Depends(get_db)) -> Pet:
+def buscar_pet(
+    pet_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
+) -> Pet:
     """Busca um pet pelo ID."""
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
     return pet
@@ -57,10 +70,11 @@ def adicionar_registro(
     pet_id: int,
     registro: RegistroComportamentoCreate,
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> RegistroComportamento:
     """Adiciona um registro de comportamento diário para um pet."""
     # Verifica se o pet existe
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
 
@@ -73,11 +87,13 @@ def adicionar_registro(
 
 @roteador.get("/{pet_id}/registros", response_model=list[RegistroComportamentoResponse])
 def listar_registros(
-    pet_id: int, db: Session = Depends(get_db)
+    pet_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> list[RegistroComportamento]:
     """Lista todos os registros de comportamento de um pet."""
     # Verifica se o pet existe
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
 
@@ -90,10 +106,12 @@ def listar_registros(
 
 @roteador.get("/{pet_id}/registros/ultimo", response_model=UltimoRegistroResponse)
 def ultimo_registro(
-    pet_id: int, db: Session = Depends(get_db)
+    pet_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> UltimoRegistroResponse:
     """Retorna o registro mais recente do pet com o estado emocional calculado."""
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
 
@@ -130,10 +148,12 @@ def ultimo_registro(
 
 @roteador.post("/{pet_id}/analisar", response_model=AnaliseComportamentoResponse)
 def analisar_comportamento(
-    pet_id: int, db: Session = Depends(get_db)
+    pet_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> AnaliseComportamentoResponse:
     """Analisa o comportamento do pet usando IA e retorna insights estruturados."""
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
 

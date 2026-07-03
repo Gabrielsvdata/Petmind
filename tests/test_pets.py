@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -5,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
 from app.main import app
+from app.models import Pet, RegistroComportamento, Usuario  # noqa: F401
 
 # Banco de dados de teste PostgreSQL
 TEST_DATABASE_URL = "postgresql://petmind:petmind123@localhost:5432/petmind_test"
@@ -33,6 +36,24 @@ def setup_db():
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def autenticar_cliente(setup_db):
+    """Registra usuário de teste e envia credenciais via HTTP Basic."""
+    client.headers.clear()
+
+    email = "tester@petmind.dev"
+    senha = "12345678"
+    client.post(
+        "/auth/register",
+        json={"nome": "Tester", "email": email, "senha": senha},
+    )
+
+    credenciais = base64.b64encode(f"{email}:{senha}".encode("utf-8")).decode("utf-8")
+    client.headers.update({"Authorization": f"Basic {credenciais}"})
+    yield
+    client.headers.clear()
 
 
 def test_raiz():
