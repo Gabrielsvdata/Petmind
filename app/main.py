@@ -50,6 +50,7 @@ origens_permitidas = [
     "http://127.0.0.1:5173",
     "http://localhost:5174",
     "http://127.0.0.1:5174",
+    "https://petmind-front.vercel.app",
 ]
 
 origens_env = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
