@@ -14,6 +14,10 @@ services:
         sync: false
       - key: GROQ_MODEL
         value: llama-3.3-70b-versatile
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
 
 databases:
   - name: petmind-db

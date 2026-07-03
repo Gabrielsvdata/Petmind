@@ -1,3 +1,5 @@
+import os
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,15 +45,32 @@ app = FastAPI(
     version="0.1.0",
 )
 
+origens_permitidas = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+
+origens_env = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+if origens_env:
+    origens_permitidas.extend(
+        origem.strip().rstrip("/")
+        for origem in origens_env.split(",")
+        if origem.strip()
+    )
+
+frontend_url = os.getenv("FRONTEND_URL", "").strip()
+if frontend_url:
+    origens_permitidas.append(frontend_url.rstrip("/"))
+
+# Remove duplicidades preservando ordem.
+origens_permitidas = list(dict.fromkeys(origens_permitidas))
+
 # CORS — permite requisições do frontend Vite
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=origens_permitidas,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
