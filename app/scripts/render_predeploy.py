@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 
@@ -11,6 +12,7 @@ USUARIOS_CREATED_REVISION = "a66159c11155"
 RESET_TOKEN_REVISION = "c9f9e6a4b201"
 PAPEL_REVISION = "d19a93f9c3f2"
 HEAD_REVISION = "f4d2b6e8a1c3"
+AUTO_MIGRATE_ENV = "PETMIND_AUTO_MIGRATE_ON_STARTUP"
 
 
 def _run_alembic(*args: str) -> None:
@@ -50,7 +52,7 @@ def _inferir_revisao_por_schema() -> str | None:
     return USUARIOS_CREATED_REVISION
 
 
-def main() -> None:
+def ensure_schema_ready() -> None:
     revisao_atual = _obter_revisao_atual()
     revisao_inferida = _inferir_revisao_por_schema()
 
@@ -70,6 +72,15 @@ def main() -> None:
             _run_alembic("stamp", revisao_inferida)
 
     _run_alembic("upgrade", "head")
+
+
+def auto_migrate_enabled() -> bool:
+    valor = os.getenv(AUTO_MIGRATE_ENV, "true").strip().lower()
+    return valor not in {"0", "false", "no", "off"}
+
+
+def main() -> None:
+    ensure_schema_ready()
 
 
 if __name__ == "__main__":

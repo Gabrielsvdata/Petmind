@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import pet, user  # noqa: F401
 from app.routes import admin, auth, pets
+from app.scripts.render_predeploy import auto_migrate_enabled, ensure_schema_ready
 
 # Carrega variáveis de ambiente
 load_dotenv()
@@ -55,6 +56,13 @@ app.add_middleware(
 app.include_router(auth.roteador)
 app.include_router(admin.roteador)
 app.include_router(pets.roteador)
+
+
+@app.on_event("startup")
+def preparar_schema() -> None:
+    """Garante que o schema esteja alinhado antes de atender requests."""
+    if auto_migrate_enabled():
+        ensure_schema_ready()
 
 
 @app.get("/")
