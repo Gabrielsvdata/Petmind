@@ -4,28 +4,24 @@ Executar: python -m app.seeds.admin_seed
 """
 
 from app.database import SessionLocal
-from app.models.user import Usuario
-from app.services.auth_service import hash_senha
+from app.services.usuario_service import buscar_usuario_por_email, criar_usuario
 
 
 def criar_admin() -> None:
     db = SessionLocal()
     try:
-        existente = db.query(Usuario).filter(
-            Usuario.email == "admin@petmind.com"
-        ).first()
+        existente = buscar_usuario_por_email(db, "admin@petmind.com")
         if existente:
             print("Admin já existe!")
             return
 
-        admin = Usuario(
+        criar_usuario(
+            db,
             nome="Admin PetMind",
             email="admin@petmind.com",
-            senha_hash=hash_senha("admin123"),
+            senha="admin123",
             papel="admin",
         )
-        db.add(admin)
-        db.commit()
         print("Admin criado com sucesso!")
         print("Email: admin@petmind.com")
         print("Senha: admin123")
