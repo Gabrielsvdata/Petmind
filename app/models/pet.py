@@ -33,7 +33,7 @@ class Pet(Base):
     registros: Mapped[list["RegistroComportamento"]] = relationship(
         back_populates="pet", cascade="all, delete-orphan"
     )
-    dono: Mapped["Usuario"] = relationship(back_populates="pets")
+    owner: Mapped["Usuario | None"] = relationship(back_populates="pets")
 
 
 class RegistroComportamento(Base):

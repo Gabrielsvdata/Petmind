@@ -8,6 +8,7 @@ e gerar insights sobre padrões e anomalias.
 import json
 import os
 import re
+from typing import Literal, TypedDict, cast
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -16,6 +17,41 @@ load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+
+class RegistroAnalise(TypedDict):
+    agitacao: int
+    sono: int
+    apetite: int
+    humor: int
+    observacoes: str | None
+
+
+class MediasAnalise(TypedDict):
+    agitacao: float
+    sono: float
+    apetite: float
+    humor: float
+
+
+class TendenciasAnalise(TypedDict):
+    agitacao: str
+    sono: str
+    apetite: str
+    humor: str
+
+
+class AnaliseComportamentoDict(TypedDict):
+    estado_predominante: str
+    confianca: int
+    medias: MediasAnalise
+    tendencias: TendenciasAnalise
+    alertas: list[str]
+    diagnostico: str
+    recomendacao: str
+
+
+CampoAnalise = Literal["agitacao", "sono", "apetite", "humor"]
 
 
 class GroqService:
@@ -33,8 +69,8 @@ class GroqService:
         self,
         nome_pet: str,
         especie: str,
-        registros: list[dict[str, object]],
-    ) -> dict[str, object]:
+        registros: list[RegistroAnalise],
+    ) -> AnaliseComportamentoDict:
         """
         Analisa registros e retorna JSON estruturado com métricas reais.
         Retorna dict com estado, confiança, médias, tendências, alertas,
@@ -43,28 +79,30 @@ class GroqService:
         # Calcular médias reais antes de enviar pra Groq
         total = len(registros)
         media_agitacao = round(sum(int(r["agitacao"]) for r in registros) / total, 1)
-        media_sono     = round(sum(int(r["sono"])     for r in registros) / total, 1)
-        media_apetite  = round(sum(int(r["apetite"])  for r in registros) / total, 1)
-        media_humor    = round(sum(int(r["humor"])    for r in registros) / total, 1)
+        media_sono = round(sum(r["sono"] for r in registros) / total, 1)
+        media_apetite = round(sum(r["apetite"] for r in registros) / total, 1)
+        media_humor = round(sum(r["humor"] for r in registros) / total, 1)
 
         # Calcular tendências comparando primeira e segunda metade
         metade = max(1, total // 2)
         primeira = registros[:metade]
-        segunda  = registros[metade:] if total > 1 else registros
+        segunda = registros[metade:] if total > 1 else registros
 
-        def tendencia(campo: str) -> str:
-            media_p = sum(int(r[campo]) for r in primeira) / len(primeira)
-            media_s = sum(int(r[campo]) for r in segunda)  / len(segunda)
+        def tendencia(campo: CampoAnalise) -> str:
+            media_p = sum(r[campo] for r in primeira) / len(primeira)
+            media_s = sum(r[campo] for r in segunda) / len(segunda)
             diff = media_s - media_p
-            if diff > 0.4:  return "piorando"   if campo in ["agitacao"] else "melhorando"
-            if diff < -0.4: return "melhorando" if campo in ["agitacao"] else "piorando"
+            if diff > 0.4:
+                return "piorando" if campo in ["agitacao"] else "melhorando"
+            if diff < -0.4:
+                return "melhorando" if campo in ["agitacao"] else "piorando"
             return "estável"
 
-        tendencias = {
+        tendencias: TendenciasAnalise = {
             "agitacao": tendencia("agitacao"),
-            "sono":     tendencia("sono"),
-            "apetite":  tendencia("apetite"),
-            "humor":    tendencia("humor"),
+            "sono": tendencia("sono"),
+            "apetite": tendencia("apetite"),
+            "humor": tendencia("humor"),
         }
 
         # Extrai eventos codificados em observacoes no formato EVENTOS:id1,id2
@@ -167,7 +205,14 @@ Regras obrigatórias:
 
         conteudo = resposta.choices[0].message.content
         if conteudo is None:
-            return self._analise_fallback(nome_pet, media_agitacao, media_sono, media_apetite, media_humor, tendencias)
+            return self._analise_fallback(
+                nome_pet,
+                media_agitacao,
+                media_sono,
+                media_apetite,
+                media_humor,
+                tendencias,
+            )
 
         # Limpar possível markdown do modelo
         conteudo = conteudo.strip()
@@ -177,9 +222,16 @@ Regras obrigatórias:
                 conteudo = conteudo[4:]
 
         try:
-            return json.loads(conteudo)  # type: ignore[no-any-return]
+            return cast(AnaliseComportamentoDict, json.loads(conteudo))
         except Exception:
-            return self._analise_fallback(nome_pet, media_agitacao, media_sono, media_apetite, media_humor, tendencias)
+            return self._analise_fallback(
+                nome_pet,
+                media_agitacao,
+                media_sono,
+                media_apetite,
+                media_humor,
+                tendencias,
+            )
 
     def _analise_fallback(
         self,
@@ -188,14 +240,18 @@ Regras obrigatórias:
         media_sono: float,
         media_apetite: float,
         media_humor: float,
-        tendencias: dict[str, str],
-    ) -> dict[str, object]:
+        tendencias: TendenciasAnalise,
+    ) -> AnaliseComportamentoDict:
         """Fallback caso o JSON da Groq venha malformado."""
         estado = "feliz"
-        if media_agitacao >= 4:   estado = "agitado"
-        elif media_humor <= 2:    estado = "triste"
-        elif media_sono <= 2:     estado = "sonolento"
-        elif media_apetite <= 2:  estado = "com_fome"
+        if media_agitacao >= 4:
+            estado = "agitado"
+        elif media_humor <= 2:
+            estado = "triste"
+        elif media_sono <= 2:
+            estado = "sonolento"
+        elif media_apetite <= 2:
+            estado = "com_fome"
 
         return {
             "estado_predominante": estado,
@@ -212,6 +268,7 @@ Regras obrigatórias:
             "recomendacao": "Continue monitorando diariamente.",
         }
 
-    # def detectar_anomalias(self, registros) -> list[dict]:
-    #     """Identifica comportamentos anômalos nos registros."""
-    #     pass
+
+def get_groq_service() -> GroqService:
+    """Retorna uma instância do GroqService."""
+    return GroqService()

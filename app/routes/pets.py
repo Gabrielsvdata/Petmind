@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies.auth import get_usuario_atual
 from app.models.pet import Pet, RegistroComportamento
 from app.models.user import Usuario
 from app.schemas.pet import (
@@ -15,8 +16,11 @@ from app.schemas.pet import (
     UltimoRegistroResponse,
 )
 from app.services.emocao_service import calcular_estado_emocional
-from app.services.auth_service import get_usuario_atual
-from app.services.groq_service import GroqService
+from app.services.groq_service import (
+    GroqService,
+    RegistroAnalise,
+    get_groq_service,
+)
 
 roteador = APIRouter(prefix="/pets", tags=["pets"])
 
@@ -41,20 +45,18 @@ def cadastrar_pet(
 @roteador.get("/", response_model=list[PetResponse])
 def listar_pets(
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_usuario_atual),
 ) -> list[Pet]:
     """Lista todos os pets cadastrados."""
-    return db.query(Pet).filter(Pet.owner_id == usuario.id).all()
+    return db.query(Pet).all()
 
 
 @roteador.get("/{pet_id}", response_model=PetResponse)
 def buscar_pet(
     pet_id: int,
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_usuario_atual),
 ) -> Pet:
     """Busca um pet pelo ID."""
-    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
     return pet
@@ -70,11 +72,10 @@ def adicionar_registro(
     pet_id: int,
     registro: RegistroComportamentoCreate,
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_usuario_atual),
 ) -> RegistroComportamento:
     """Adiciona um registro de comportamento diário para um pet."""
     # Verifica se o pet existe
-    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
 
@@ -89,11 +90,10 @@ def adicionar_registro(
 def listar_registros(
     pet_id: int,
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_usuario_atual),
 ) -> list[RegistroComportamento]:
     """Lista todos os registros de comportamento de um pet."""
     # Verifica se o pet existe
-    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
 
@@ -108,10 +108,9 @@ def listar_registros(
 def ultimo_registro(
     pet_id: int,
     db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_usuario_atual),
 ) -> UltimoRegistroResponse:
     """Retorna o registro mais recente do pet com o estado emocional calculado."""
-    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
+    pet = db.query(Pet).filter(Pet.id == pet_id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
 
@@ -151,9 +150,11 @@ def analisar_comportamento(
     pet_id: int,
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_usuario_atual),
+    service: GroqService = Depends(get_groq_service),
 ) -> AnaliseComportamentoResponse:
     """Analisa o comportamento do pet usando IA e retorna insights estruturados."""
-    pet = db.query(Pet).filter(Pet.id == pet_id, Pet.owner_id == usuario.id).first()
+    _ = usuario
+    pet = db.query(Pet).filter(Pet.id == pet_id).first()
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet não encontrado")
 
@@ -168,7 +169,7 @@ def analisar_comportamento(
             status_code=400, detail="Nenhum registro encontrado para este pet"
         )
 
-    registros_dict: list[dict[str, object]] = [
+    registros_dict: list[RegistroAnalise] = [
         {
             "agitacao": r.agitacao,
             "sono": r.sono,
@@ -179,7 +180,6 @@ def analisar_comportamento(
         for r in registros
     ]
 
-    service = GroqService()
     analise = service.analisar_comportamento(pet.nome, pet.especie, registros_dict)
 
     return AnaliseComportamentoResponse(
@@ -187,11 +187,11 @@ def analisar_comportamento(
         nome_pet=pet.nome,
         especie=pet.especie,
         total_registros=len(registros),
-        estado_predominante=str(analise.get("estado_predominante", "feliz")),
-        confianca=int(analise.get("confianca", 70)),  # type: ignore[arg-type]
-        medias=MediasSchema(**analise.get("medias", {})),  # type: ignore[arg-type]
-        tendencias=TendenciasSchema(**analise.get("tendencias", {})),  # type: ignore[arg-type]
-        alertas=list(analise.get("alertas", [])),  # type: ignore[arg-type]
-        diagnostico=str(analise.get("diagnostico", "")),
-        recomendacao=str(analise.get("recomendacao", "")),
+        estado_predominante=analise["estado_predominante"],
+        confianca=analise["confianca"],
+        medias=MediasSchema(**analise["medias"]),
+        tendencias=TendenciasSchema(**analise["tendencias"]),
+        alertas=analise["alertas"],
+        diagnostico=analise["diagnostico"],
+        recomendacao=analise["recomendacao"],
     )
