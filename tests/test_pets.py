@@ -38,6 +38,11 @@ def setup_db():
 client = TestClient(app)
 
 
+def credenciais_basic(email: str, senha: str) -> dict[str, str]:
+    token = base64.b64encode(f"{email}:{senha}".encode("utf-8")).decode("utf-8")
+    return {"Authorization": f"Basic {token}"}
+
+
 @pytest.fixture(autouse=True)
 def autenticar_cliente(setup_db):
     """Registra usuário de teste e envia credenciais via HTTP Basic."""
@@ -50,8 +55,7 @@ def autenticar_cliente(setup_db):
         json={"nome": "Tester", "email": email, "senha": senha},
     )
 
-    credenciais = base64.b64encode(f"{email}:{senha}".encode("utf-8")).decode("utf-8")
-    client.headers.update({"Authorization": f"Basic {credenciais}"})
+    client.headers.update(credenciais_basic(email, senha))
     yield
     client.headers.clear()
 
@@ -98,6 +102,26 @@ def test_listar_pets():
     assert len(resposta.json()) == 2
 
 
+def test_listar_pets_retorna_apenas_do_usuario_autenticado():
+    client.post(
+        "/pets/", json={"nome": "Rex", "raca": "Labrador", "idade": 3, "peso": 25.0}
+    )
+
+    outro_email = "outro@petmind.dev"
+    outra_senha = "12345678"
+    client.post(
+        "/auth/register",
+        json={"nome": "Outro", "email": outro_email, "senha": outra_senha},
+    )
+    resposta = client.get(
+        "/pets/",
+        headers=credenciais_basic(outro_email, outra_senha),
+    )
+
+    assert resposta.status_code == 200
+    assert resposta.json() == []
+
+
 def test_buscar_pet():
     cadastra = client.post(
         "/pets/", json={"nome": "Rex", "raca": "Labrador", "idade": 3, "peso": 25.0}
@@ -111,6 +135,27 @@ def test_buscar_pet():
 def test_buscar_pet_nao_encontrado():
     resposta = client.get("/pets/999")
     assert resposta.status_code == 404
+
+
+def test_usuario_nao_pode_acessar_pet_de_outro_usuario():
+    cadastra = client.post(
+        "/pets/", json={"nome": "Rex", "raca": "Labrador", "idade": 3, "peso": 25.0}
+    )
+    pet_id = cadastra.json()["id"]
+
+    outro_email = "outro2@petmind.dev"
+    outra_senha = "12345678"
+    client.post(
+        "/auth/register",
+        json={"nome": "Outro 2", "email": outro_email, "senha": outra_senha},
+    )
+    resposta = client.get(
+        f"/pets/{pet_id}",
+        headers=credenciais_basic(outro_email, outra_senha),
+    )
+
+    assert resposta.status_code == 403
+    assert resposta.json()["detail"] == "Acesso negado a este pet"
 
 
 def test_adicionar_registro():

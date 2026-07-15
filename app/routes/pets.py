@@ -25,6 +25,15 @@ from app.services.groq_service import (
 roteador = APIRouter(prefix="/pets", tags=["pets"])
 
 
+def _buscar_pet_autorizado(db: Session, pet_id: int, usuario: Usuario) -> Pet:
+    pet = db.query(Pet).filter(Pet.id == pet_id).first()
+    if pet is None:
+        raise HTTPException(status_code=404, detail="Pet não encontrado")
+    if usuario.papel != "admin" and pet.owner_id != usuario.id:
+        raise HTTPException(status_code=403, detail="Acesso negado a este pet")
+    return pet
+
+
 # ── Pets ──────────────────────────────────────────────────────────────────────
 
 
@@ -45,21 +54,23 @@ def cadastrar_pet(
 @roteador.get("/", response_model=list[PetResponse])
 def listar_pets(
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> list[Pet]:
-    """Lista todos os pets cadastrados."""
-    return db.query(Pet).all()
+    """Lista pets do usuário autenticado; admin pode ver todos."""
+    consulta = db.query(Pet)
+    if usuario.papel != "admin":
+        consulta = consulta.filter(Pet.owner_id == usuario.id)
+    return consulta.all()
 
 
 @roteador.get("/{pet_id}", response_model=PetResponse)
 def buscar_pet(
     pet_id: int,
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> Pet:
     """Busca um pet pelo ID."""
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
-    if pet is None:
-        raise HTTPException(status_code=404, detail="Pet não encontrado")
-    return pet
+    return _buscar_pet_autorizado(db, pet_id, usuario)
 
 
 # ── Registros de Comportamento ────────────────────────────────────────────────
@@ -72,12 +83,10 @@ def adicionar_registro(
     pet_id: int,
     registro: RegistroComportamentoCreate,
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> RegistroComportamento:
     """Adiciona um registro de comportamento diário para um pet."""
-    # Verifica se o pet existe
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
-    if pet is None:
-        raise HTTPException(status_code=404, detail="Pet não encontrado")
+    _buscar_pet_autorizado(db, pet_id, usuario)
 
     novo_registro = RegistroComportamento(**registro.model_dump(), pet_id=pet_id)
     db.add(novo_registro)
@@ -90,12 +99,10 @@ def adicionar_registro(
 def listar_registros(
     pet_id: int,
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> list[RegistroComportamento]:
     """Lista todos os registros de comportamento de um pet."""
-    # Verifica se o pet existe
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
-    if pet is None:
-        raise HTTPException(status_code=404, detail="Pet não encontrado")
+    _buscar_pet_autorizado(db, pet_id, usuario)
 
     return (
         db.query(RegistroComportamento)
@@ -108,11 +115,10 @@ def listar_registros(
 def ultimo_registro(
     pet_id: int,
     db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_atual),
 ) -> UltimoRegistroResponse:
     """Retorna o registro mais recente do pet com o estado emocional calculado."""
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
-    if pet is None:
-        raise HTTPException(status_code=404, detail="Pet não encontrado")
+    _buscar_pet_autorizado(db, pet_id, usuario)
 
     registro = (
         db.query(RegistroComportamento)
@@ -153,10 +159,7 @@ def analisar_comportamento(
     service: GroqService = Depends(get_groq_service),
 ) -> AnaliseComportamentoResponse:
     """Analisa o comportamento do pet usando IA e retorna insights estruturados."""
-    _ = usuario
-    pet = db.query(Pet).filter(Pet.id == pet_id).first()
-    if pet is None:
-        raise HTTPException(status_code=404, detail="Pet não encontrado")
+    pet = _buscar_pet_autorizado(db, pet_id, usuario)
 
     registros = (
         db.query(RegistroComportamento)
