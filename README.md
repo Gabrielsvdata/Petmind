@@ -138,8 +138,8 @@ git push -u origin main
 **4. Aguarde o deploy**
 
 - O Render executa `pip install -r requirements.txt`
-- Em seguida inicia com `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- As tabelas são criadas automaticamente no primeiro start (`create_all`)
+- Em seguida aplica `python -m alembic upgrade head` e sobe a API com `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- O schema do banco passa a ser atualizado pelas migrations do Alembic a cada deploy
 - URL final: `https://petmind.onrender.com/docs`
 
 ### Variáveis de ambiente no Render
@@ -149,11 +149,14 @@ git push -u origin main
 | `DATABASE_URL` | Automático (linked database) | — |
 | `GROQ_API_KEY` | Manual | sua chave |
 | `GROQ_MODEL` | `render.yaml` | `llama-3.3-70b-versatile` |
+| `FRONTEND_URL` | Manual | `https://webpetmind.vercel.app` |
+| `CORS_ALLOW_ORIGINS` | Manual/opcional | origens extras separadas por vírgula |
 
 ### Notas importantes
 
 - **Plano free do Render**: o serviço hiberna após 15 min de inatividade — o primeiro request pode demorar ~30s para "acordar".
 - **Banco free**: limite de 1 GB de armazenamento e expira após 90 dias sem uso.
 - O `render.yaml` já corrige automaticamente a URL `postgres://` → `postgresql://` (necessário para SQLAlchemy).
+- Como o deploy roda `alembic upgrade head`, mantenha a pasta `migrations/` versionada no repositório.
 
 # Petmind
