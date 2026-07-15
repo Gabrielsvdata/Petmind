@@ -10,12 +10,14 @@ from app.models.pet import Pet, RegistroComportamento
 from app.models.user import Usuario
 from app.schemas.admin import (
     AlterarPapelRequest,
+    CriarAdminRequest,
     EstatisticasResponse,
     UsuarioAdminResponse,
     UsuarioDetalheAdminResponse,
 )
 from app.schemas.pet import PetResponse
 from app.services.emocao_service import calcular_estado_emocional
+from app.services.usuario_service import criar_usuario
 
 roteador = APIRouter(
     prefix="/admin",
@@ -83,6 +85,21 @@ def detalhar_usuario(
         **resumo.model_dump(),
         pets=[PetResponse.model_validate(pet) for pet in pets],
     )
+
+
+@roteador.post("/usuarios/admin", response_model=UsuarioAdminResponse, status_code=201)
+def criar_usuario_admin(
+    request: CriarAdminRequest,
+    db: Session = Depends(get_db),
+) -> UsuarioAdminResponse:
+    usuario = criar_usuario(
+        db,
+        nome=request.nome,
+        email=request.email,
+        senha=request.senha,
+        papel="admin",
+    )
+    return _resumo_usuario(db, usuario)
 
 
 @roteador.put("/usuarios/{usuario_id}/papel")

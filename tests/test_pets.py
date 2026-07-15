@@ -43,6 +43,17 @@ def credenciais_basic(email: str, senha: str) -> dict[str, str]:
     return {"Authorization": f"Basic {token}"}
 
 
+def promover_usuario_para_admin(email: str) -> None:
+    db = TestingSessionLocal()
+    try:
+        usuario = db.query(Usuario).filter(Usuario.email == email).first()
+        assert usuario is not None
+        usuario.papel = "admin"
+        db.commit()
+    finally:
+        db.close()
+
+
 @pytest.fixture(autouse=True)
 def autenticar_cliente(setup_db):
     """Registra usuário de teste e envia credenciais via HTTP Basic."""
@@ -380,3 +391,20 @@ def test_analisar_sem_registros():
     resposta = client.post(f"/pets/{pet_id}/analisar")
     assert resposta.status_code == 400
     assert resposta.json()["detail"] == "Nenhum registro encontrado para este pet"
+
+
+def test_admin_pode_criar_outro_administrador():
+    email_admin = "tester@petmind.dev"
+    promover_usuario_para_admin(email_admin)
+
+    payload = {
+        "nome": "Admin Secundario",
+        "email": "admin.secundario@petmind.dev",
+        "senha": "12345678",
+    }
+    resposta = client.post("/admin/usuarios/admin", json=payload)
+
+    assert resposta.status_code == 201
+    dados = resposta.json()
+    assert dados["email"] == payload["email"]
+    assert dados["papel"] == "admin"

@@ -22,6 +22,12 @@ class AlterarPapelRequest(BaseModel):
     papel: str = Field(..., pattern="^(usuario|admin)$")
 
 
+class CriarAdminRequest(BaseModel):
+    nome: str = Field(..., min_length=2, max_length=100)
+    email: str = Field(..., max_length=255)
+    senha: str = Field(..., min_length=6, max_length=255)
+
+
 class UsuarioDetalheAdminResponse(BaseModel):
     id: int
     nome: str
