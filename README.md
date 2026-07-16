@@ -151,6 +151,28 @@ git push -u origin main
 | `GROQ_MODEL` | `render.yaml` | `llama-3.3-70b-versatile` |
 | `FRONTEND_URL` | Manual | `https://webpetmind.vercel.app` |
 | `CORS_ALLOW_ORIGINS` | Manual/opcional | origens extras separadas por vírgula |
+| `ENABLE_ADMIN_BOOTSTRAP` | Manual (teste) | `true` para liberar criação do primeiro admin |
+| `ADMIN_BOOTSTRAP_KEY` | Manual/opcional | chave exigida no payload de criação de admin |
+
+### Bootstrap de Administrador (ambiente de teste)
+
+- Endpoint de status para a tela decidir se mostra a opção de criar admin: `GET /auth/admin-bootstrap/status`
+- Endpoint de criação do primeiro admin: `POST /auth/register-admin`
+- Regras:
+  - Só funciona com `ENABLE_ADMIN_BOOTSTRAP=true`
+  - Se `ADMIN_BOOTSTRAP_KEY` estiver definida, o payload deve incluir `chave_bootstrap`
+  - Após existir um admin, o endpoint retorna `409` e a criação de novos admins deve ser feita por `/admin/usuarios/admin`
+
+Payload exemplo:
+
+```json
+{
+  "nome": "Admin Teste",
+  "email": "admin.teste@petmind.dev",
+  "senha": "12345678",
+  "chave_bootstrap": "opcional-se-configurada"
+}
+```
 
 ### Notas importantes
 

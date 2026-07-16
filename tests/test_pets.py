@@ -408,3 +408,75 @@ def test_admin_pode_criar_outro_administrador():
     dados = resposta.json()
     assert dados["email"] == payload["email"]
     assert dados["papel"] == "admin"
+
+
+def test_status_admin_bootstrap_desabilitado_por_padrao():
+    resposta = client.get("/auth/admin-bootstrap/status")
+
+    assert resposta.status_code == 200
+    dados = resposta.json()
+    assert dados == {"habilitado": False, "exige_chave": False}
+
+
+def test_bootstrap_admin_cria_primeiro_admin_quando_habilitado(monkeypatch):
+    monkeypatch.setenv("ENABLE_ADMIN_BOOTSTRAP", "true")
+
+    payload = {
+        "nome": "Primeiro Admin",
+        "email": "primeiro.admin@petmind.dev",
+        "senha": "12345678",
+    }
+    resposta = client.post("/auth/register-admin", json=payload)
+
+    assert resposta.status_code == 201
+    dados = resposta.json()
+    assert dados["email"] == payload["email"]
+    assert dados["papel"] == "admin"
+
+
+def test_bootstrap_admin_bloqueia_quando_ja_existe_admin(monkeypatch):
+    monkeypatch.setenv("ENABLE_ADMIN_BOOTSTRAP", "true")
+
+    primeiro = {
+        "nome": "Primeiro Admin",
+        "email": "primeiro.admin@petmind.dev",
+        "senha": "12345678",
+    }
+    client.post("/auth/register-admin", json=primeiro)
+
+    segundo = {
+        "nome": "Segundo Admin",
+        "email": "segundo.admin@petmind.dev",
+        "senha": "12345678",
+    }
+    resposta = client.post("/auth/register-admin", json=segundo)
+
+    assert resposta.status_code == 409
+    assert "Administrador já existe" in resposta.json()["detail"]
+
+
+def test_bootstrap_admin_exige_chave_quando_configurada(monkeypatch):
+    monkeypatch.setenv("ENABLE_ADMIN_BOOTSTRAP", "true")
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_KEY", "segredo-teste")
+
+    status = client.get("/auth/admin-bootstrap/status")
+    assert status.status_code == 200
+    assert status.json() == {"habilitado": True, "exige_chave": True}
+
+    sem_chave = {
+        "nome": "Primeiro Admin",
+        "email": "admin.sem.chave@petmind.dev",
+        "senha": "12345678",
+    }
+    resposta_sem_chave = client.post("/auth/register-admin", json=sem_chave)
+    assert resposta_sem_chave.status_code == 403
+
+    com_chave = {
+        "nome": "Primeiro Admin",
+        "email": "admin.com.chave@petmind.dev",
+        "senha": "12345678",
+        "chave_bootstrap": "segredo-teste",
+    }
+    resposta_com_chave = client.post("/auth/register-admin", json=com_chave)
+    assert resposta_com_chave.status_code == 201
+    assert resposta_com_chave.json()["papel"] == "admin"

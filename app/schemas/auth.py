@@ -8,6 +8,10 @@ class RegistroRequest(BaseModel):
     senha: str = Field(..., min_length=6)
 
 
+class RegistroAdminBootstrapRequest(RegistroRequest):
+    chave_bootstrap: str | None = None
+
+
 class LoginRequest(BaseModel):
     email: str
     senha: str
@@ -28,3 +32,8 @@ class UsuarioResponse(BaseModel):
     papel: str
 
     model_config = {"from_attributes": True}
+
+
+class AdminBootstrapStatusResponse(BaseModel):
+    habilitado: bool
+    exige_chave: bool
