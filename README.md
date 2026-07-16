@@ -174,6 +174,19 @@ Payload exemplo:
 }
 ```
 
+### Acessos de teste (reset completo)
+
+Para apagar todos os cadastros/login do backend e recriar somente 1 usuário comum + 1 administrador:
+
+```bash
+python -m app.seeds.reset_demo_acessos
+```
+
+Credenciais criadas pelo comando:
+
+- Usuário comum: `teste@teste.com` / `12345678`
+- Administrador: `admin@admin.com` / `12345678`
+
 ### Notas importantes
 
 - **Plano free do Render**: o serviço hiberna após 15 min de inatividade — o primeiro request pode demorar ~30s para "acordar".
