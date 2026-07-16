@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.user import Usuario
 from app.schemas.auth import (
     AdminBootstrapStatusResponse,
     LoginRequest,
@@ -25,17 +24,13 @@ ADMIN_BOOTSTRAP_KEY_ENV = "ADMIN_BOOTSTRAP_KEY"
 
 
 def _admin_bootstrap_habilitado() -> bool:
-    valor = os.getenv(ADMIN_BOOTSTRAP_ENV, "false").strip().lower()
+    valor = os.getenv(ADMIN_BOOTSTRAP_ENV, "true").strip().lower()
     return valor in {"1", "true", "yes", "on"}
 
 
 def _admin_bootstrap_key() -> str | None:
     chave = os.getenv(ADMIN_BOOTSTRAP_KEY_ENV, "").strip()
     return chave or None
-
-
-def _ja_existe_admin(db: Session) -> bool:
-    return db.query(Usuario).filter(Usuario.papel == "admin").first() is not None
 
 
 @roteador.post("/registro", response_model=UsuarioResponse, status_code=201)
@@ -58,7 +53,7 @@ def registrar(
     response_model=AdminBootstrapStatusResponse,
 )
 def status_admin_bootstrap() -> AdminBootstrapStatusResponse:
-    """Informa se a tela deve exibir a opção de criar primeiro admin."""
+    """Informa se a tela deve exibir a opção de criar conta admin."""
     chave = _admin_bootstrap_key()
     return AdminBootstrapStatusResponse(
         habilitado=_admin_bootstrap_habilitado(),
@@ -80,7 +75,7 @@ def registrar_admin_bootstrap(
     request: RegistroAdminBootstrapRequest,
     db: Session = Depends(get_db),
 ) -> UsuarioResponse:
-    """Cria o primeiro admin quando o bootstrap estiver habilitado."""
+    """Cria conta admin via fluxo de bootstrap para ambiente de teste."""
     if not _admin_bootstrap_habilitado():
         raise HTTPException(
             status_code=403,
@@ -90,12 +85,6 @@ def registrar_admin_bootstrap(
     chave = _admin_bootstrap_key()
     if chave and request.chave_bootstrap != chave:
         raise HTTPException(status_code=403, detail="Chave de bootstrap inválida")
-
-    if _ja_existe_admin(db):
-        raise HTTPException(
-            status_code=409,
-            detail="Administrador já existe. Use /admin/usuarios/admin",
-        )
 
     return criar_usuario(
         db,

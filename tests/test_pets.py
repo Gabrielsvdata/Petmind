@@ -410,20 +410,18 @@ def test_admin_pode_criar_outro_administrador():
     assert dados["papel"] == "admin"
 
 
-def test_status_admin_bootstrap_desabilitado_por_padrao():
+def test_status_admin_bootstrap_habilitado_por_padrao():
     resposta = client.get("/auth/admin-bootstrap/status")
 
     assert resposta.status_code == 200
     dados = resposta.json()
-    assert dados == {"habilitado": False, "exige_chave": False}
+    assert dados == {"habilitado": True, "exige_chave": False}
 
 
-def test_bootstrap_admin_cria_primeiro_admin_quando_habilitado(monkeypatch):
-    monkeypatch.setenv("ENABLE_ADMIN_BOOTSTRAP", "true")
-
+def test_bootstrap_admin_cria_admin_quando_habilitado():
     payload = {
-        "nome": "Primeiro Admin",
-        "email": "primeiro.admin@petmind.dev",
+        "nome": "Admin Novo",
+        "email": "admin.novo@petmind.dev",
         "senha": "12345678",
     }
     resposta = client.post("/auth/register-admin", json=payload)
@@ -434,9 +432,7 @@ def test_bootstrap_admin_cria_primeiro_admin_quando_habilitado(monkeypatch):
     assert dados["papel"] == "admin"
 
 
-def test_bootstrap_admin_bloqueia_quando_ja_existe_admin(monkeypatch):
-    monkeypatch.setenv("ENABLE_ADMIN_BOOTSTRAP", "true")
-
+def test_bootstrap_admin_permite_multiplos_admins():
     primeiro = {
         "nome": "Primeiro Admin",
         "email": "primeiro.admin@petmind.dev",
@@ -451,8 +447,8 @@ def test_bootstrap_admin_bloqueia_quando_ja_existe_admin(monkeypatch):
     }
     resposta = client.post("/auth/register-admin", json=segundo)
 
-    assert resposta.status_code == 409
-    assert "Administrador já existe" in resposta.json()["detail"]
+    assert resposta.status_code == 201
+    assert resposta.json()["papel"] == "admin"
 
 
 def test_bootstrap_admin_exige_chave_quando_configurada(monkeypatch):
