@@ -1,5 +1,3 @@
-import base64
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -10,7 +8,7 @@ from app.main import app
 from app.models import Pet, RegistroComportamento, Usuario  # noqa: F401
 
 # Banco de dados de teste PostgreSQL
-TEST_DATABASE_URL = "postgresql://petmind:petmind123@localhost:5432/petmind_test"
+TEST_DATABASE_URL = "postgresql+psycopg2://petmind:petmind123@localhost:5432/petmind_test"
 
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -38,9 +36,13 @@ def setup_db():
 client = TestClient(app)
 
 
-def credenciais_basic(email: str, senha: str) -> dict[str, str]:
-    token = base64.b64encode(f"{email}:{senha}".encode("utf-8")).decode("utf-8")
-    return {"Authorization": f"Basic {token}"}
+def credenciais(email: str, senha: str) -> dict[str, str]:
+    """Faz login e devolve o cabeçalho com o token de acesso."""
+    resposta = client.post(
+        "/auth/login", json={"email": email, "senha": senha}, headers={}
+    )
+    assert resposta.status_code == 200, resposta.text
+    return {"Authorization": f"Bearer {resposta.json()['access_token']}"}
 
 
 def promover_usuario_para_admin(email: str) -> None:
@@ -56,7 +58,7 @@ def promover_usuario_para_admin(email: str) -> None:
 
 @pytest.fixture(autouse=True)
 def autenticar_cliente(setup_db):
-    """Registra usuário de teste e envia credenciais via HTTP Basic."""
+    """Registra usuário de teste e envia o token de login nas requisições."""
     client.headers.clear()
 
     email = "tester@petmind.dev"
@@ -66,7 +68,7 @@ def autenticar_cliente(setup_db):
         json={"nome": "Tester", "email": email, "senha": senha},
     )
 
-    client.headers.update(credenciais_basic(email, senha))
+    client.headers.update(credenciais(email, senha))
     yield
     client.headers.clear()
 
@@ -126,7 +128,7 @@ def test_listar_pets_retorna_apenas_do_usuario_autenticado():
     )
     resposta = client.get(
         "/pets/",
-        headers=credenciais_basic(outro_email, outra_senha),
+        headers=credenciais(outro_email, outra_senha),
     )
 
     assert resposta.status_code == 200
@@ -162,7 +164,7 @@ def test_usuario_nao_pode_acessar_pet_de_outro_usuario():
     )
     resposta = client.get(
         f"/pets/{pet_id}",
-        headers=credenciais_basic(outro_email, outra_senha),
+        headers=credenciais(outro_email, outra_senha),
     )
 
     assert resposta.status_code == 403
@@ -410,15 +412,20 @@ def test_admin_pode_criar_outro_administrador():
     assert dados["papel"] == "admin"
 
 
-def test_status_admin_bootstrap_habilitado_por_padrao():
+def test_status_admin_bootstrap_desabilitado_por_padrao(monkeypatch):
+    monkeypatch.delenv("ENABLE_ADMIN_BOOTSTRAP", raising=False)
     resposta = client.get("/auth/admin-bootstrap/status")
 
     assert resposta.status_code == 200
     dados = resposta.json()
-    assert dados == {"habilitado": True, "exige_chave": False}
+    assert dados == {"habilitado": False, "exige_chave": False}
+
+    payload = {"nome": "X", "email": "x@petmind.dev", "senha": "12345678"}
+    assert client.post("/auth/register-admin", json=payload).status_code == 403
 
 
-def test_bootstrap_admin_cria_admin_quando_habilitado():
+def test_bootstrap_admin_cria_admin_quando_habilitado(monkeypatch):
+    monkeypatch.setenv("ENABLE_ADMIN_BOOTSTRAP", "true")
     payload = {
         "nome": "Admin Novo",
         "email": "admin.novo@petmind.dev",
@@ -432,7 +439,8 @@ def test_bootstrap_admin_cria_admin_quando_habilitado():
     assert dados["papel"] == "admin"
 
 
-def test_bootstrap_admin_permite_multiplos_admins():
+def test_bootstrap_admin_permite_multiplos_admins(monkeypatch):
+    monkeypatch.setenv("ENABLE_ADMIN_BOOTSTRAP", "true")
     primeiro = {
         "nome": "Primeiro Admin",
         "email": "primeiro.admin@petmind.dev",
@@ -476,3 +484,138 @@ def test_bootstrap_admin_exige_chave_quando_configurada(monkeypatch):
     resposta_com_chave = client.post("/auth/register-admin", json=com_chave)
     assert resposta_com_chave.status_code == 201
     assert resposta_com_chave.json()["papel"] == "admin"
+
+
+# ─── Token e modo demonstração ─────────────────────────────
+
+
+def test_rotas_exigem_token():
+    assert client.get("/pets/", headers={"Authorization": ""}).status_code == 401
+    falso = {"Authorization": "Bearer token-falso"}
+    assert client.get("/pets/", headers=falso).status_code == 401
+
+
+def test_http_basic_nao_e_mais_aceito():
+    import base64
+
+    basic = base64.b64encode(b"tester@petmind.dev:12345678").decode()
+    resposta = client.get("/pets/", headers={"Authorization": f"Basic {basic}"})
+    assert resposta.status_code == 401
+
+
+def test_login_devolve_token_e_me_funciona():
+    resposta = client.post(
+        "/auth/login",
+        json={"email": "tester@petmind.dev", "senha": "12345678"},
+        headers={},
+    )
+    dados = resposta.json()
+    assert dados["access_token"]
+    assert "senha" not in dados
+    eu = client.get(
+        "/auth/me", headers={"Authorization": f"Bearer {dados['access_token']}"}
+    )
+    assert eu.status_code == 200
+    assert eu.json()["email"] == "tester@petmind.dev"
+
+
+def _popular_demo():
+    from app.seeds.demo_seed import popular_demo
+
+    db = TestingSessionLocal()
+    try:
+        popular_demo(db)
+    finally:
+        db.close()
+
+
+def test_login_demo_desligado_por_padrao(monkeypatch):
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    resposta = client.post("/auth/login-demo", json={"perfil": "usuario"}, headers={})
+    assert resposta.status_code == 404
+
+
+def test_login_demo_entra_e_ve_pets(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    _popular_demo()
+    token = client.post(
+        "/auth/login-demo", json={"perfil": "usuario"}, headers={}
+    ).json()["access_token"]
+    pets = client.get("/pets/", headers={"Authorization": f"Bearer {token}"}).json()
+    assert {p["nome"] for p in pets} == {"Thor", "Mia", "Pipoca"}
+
+
+def test_contas_demo_protegidas(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    _popular_demo()
+    token = client.post(
+        "/auth/login-demo", json={"perfil": "admin"}, headers={}
+    ).json()["access_token"]
+    cabecalho = {"Authorization": f"Bearer {token}"}
+    usuarios = client.get("/admin/usuarios", headers=cabecalho).json()
+    tutor_demo = next(u for u in usuarios if u["email"] == "tutor.demo@petmind.dev")
+    url = f"/admin/usuarios/{tutor_demo['id']}"
+    assert client.delete(url, headers=cabecalho).status_code == 403
+    assert (
+        client.put(f"{url}/papel", json={"papel": "admin"}, headers=cabecalho)
+        .status_code
+        == 403
+    )
+
+
+# ─── Análise: números em Python, texto pela IA ─────────────
+
+
+REGISTROS = [
+    {"agitacao": 5, "sono": 2, "apetite": 3, "humor": 3, "observacoes": None},
+    {"agitacao": 4, "sono": 2, "apetite": 4, "humor": 3, "observacoes": None},
+    {"agitacao": 5, "sono": 3, "apetite": 4, "humor": 4, "observacoes": None},
+]
+
+
+def test_metricas_sao_deterministicas():
+    from app.services.groq_service import calcular_metricas
+
+    primeira = calcular_metricas(REGISTROS)  # type: ignore[arg-type]
+    segunda = calcular_metricas(REGISTROS)  # type: ignore[arg-type]
+    assert primeira == segunda
+    assert primeira["medias"] == {
+        "agitacao": 4.7, "sono": 2.3, "apetite": 3.7, "humor": 3.3
+    }
+    assert primeira["estado_predominante"] == "agitado"
+    assert 60 <= primeira["confianca"] <= 98
+    assert any("Agitação alta" in a for a in primeira["alertas"])
+    assert any("Sono baixo" in a for a in primeira["alertas"])
+
+
+def test_ia_nao_altera_numeros(monkeypatch):
+    from app.services import groq_service
+
+    def texto_da_ia(self, nome_pet, especie, analise, eventos):
+        return {
+            "diagnostico": "Texto da IA",
+            "recomendacao": "Ação da IA",
+            "confianca": 10,
+            "estado_predominante": "triste",
+        }
+
+    monkeypatch.setattr(groq_service.GroqService, "_escrever_texto", texto_da_ia)
+    analise = groq_service.GroqService().analisar_comportamento(
+        "Rex", "cachorro", REGISTROS  # type: ignore[arg-type]
+    )
+    assert analise["diagnostico"] == "Texto da IA"
+    assert analise["estado_predominante"] == "agitado"
+    assert analise["confianca"] != 10
+
+
+def test_analise_funciona_sem_ia(monkeypatch):
+    from app.services import groq_service
+
+    monkeypatch.setattr(
+        groq_service.GroqService, "_escrever_texto", lambda *args: None
+    )
+    analise = groq_service.GroqService().analisar_comportamento(
+        "Rex", "cachorro", REGISTROS  # type: ignore[arg-type]
+    )
+    assert analise["diagnostico"].startswith("Rex está predominantemente agitado")
+    assert analise["recomendacao"]

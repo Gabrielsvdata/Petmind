@@ -17,8 +17,14 @@ class LoginRequest(BaseModel):
     senha: str
 
 
+class LoginDemoRequest(BaseModel):
+    perfil: str = "usuario"
+
+
 class LoginResponse(BaseModel):
     mensagem: str
+    access_token: str
+    token_type: str = "bearer"
     usuario_id: int
     nome: str
     email: str

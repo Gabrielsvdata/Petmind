@@ -1,7 +1,8 @@
 # PetMind
 
 API REST para registro de comportamentos e rotinas de pets com análise de IA.  
-Construída com **FastAPI + PostgreSQL + Groq** para a **World Code Cup**.
+Construída com **FastAPI + PostgreSQL + Groq** para a **World Code Cup**.  
+Deploy: **Docker + Google Cloud Run**, banco **Postgres (Neon)**.
 
 ---
 
@@ -48,6 +49,9 @@ python -m uvicorn app.main:app --reload
 | GET | `/pets/{id}/registros` | Listar registros do pet |
 | GET | `/pets/{id}/registros/ultimo` | Último registro com estado emocional |
 | POST | `/pets/{id}/analisar` | Análise de comportamento via IA (Groq) |
+| POST | `/auth/login` | Login (devolve token) |
+| POST | `/auth/login-demo` | Login de visitante (com `DEMO_MODE=true`) |
+| GET | `/auth/me` | Usuário do token |
 
 ---
 
@@ -102,96 +106,53 @@ python -m alembic history
 
 ---
 
-## Deploy no Render
+## Autenticação
 
-### Pré-requisitos
-- Conta no [Render](https://render.com)
-- Repositório no GitHub com o projeto
-- Chave de API do [Groq](https://console.groq.com)
+- `POST /auth/login` devolve um **token de acesso (JWT)**, válido por 8 h por padrão.
+- As rotas de pets e admin exigem `Authorization: Bearer <token>`.
+- `GET /auth/me` retorna o usuário do token.
+- A senha não trafega nem fica guardada no navegador depois do login.
+- Criar admin pela tela (`/auth/register-admin`) fica **desligado por padrão**
+  (`ENABLE_ADMIN_BOOTSTRAP=true` só em ambiente de teste).
 
-### Passo a passo
+## Análise com IA
 
-**1. Suba o código para o GitHub**
-```bash
-git init
-git add .
-git commit -m "feat: petmind fase 2"
-git remote add origin https://github.com/seu-usuario/petmind.git
-git push -u origin main
+Os números da análise são calculados em Python, com regras fixas: médias, tendências,
+estado predominante, confiança e alertas. A IA (Groq) só escreve o diagnóstico e a
+recomendação em texto. Assim, os mesmos registros geram sempre os mesmos números,
+e se a IA estiver fora do ar a análise continua funcionando com um texto padrão.
+
+## Modo demonstração
+
+Com `DEMO_MODE=true`, a API cria na subida duas contas de visitante (tutor e admin),
+outros tutores, pets e uma semana de registros, e libera:
+
+```
+POST /auth/login-demo   {"perfil": "usuario" | "admin"}
 ```
 
-**2. Crie o projeto no Render via Blueprint**
+As contas de demonstração não podem ser removidas nem ter o papel alterado.
+Para recriar os dados: `python -m app.seeds.demo_seed --reset`.
 
-- Acesse [dashboard.render.com](https://dashboard.render.com)
-- Clique em **New → Blueprint**
-- Conecte seu repositório GitHub
-- O Render vai detectar o `render.yaml` e criar automaticamente:
-  - **Web Service** `petmind` (FastAPI)
-  - **PostgreSQL** `petmind-db` (banco gerenciado)
+## Deploy no Google Cloud Run
 
-**3. Configure a variável de ambiente GROQ_API_KEY**
-
-- No painel do serviço `petmind` → **Environment**
-- Adicione: `GROQ_API_KEY` = `<sua chave do Groq>`
-- Clique em **Save Changes** (o serviço vai reiniciar)
-
-**4. Aguarde o deploy**
-
-- O Render executa `pip install -r requirements.txt`
-- Em seguida executa `python -m app.scripts.render_predeploy`, que alinha o Alembic ao schema detectado e aplica `upgrade head` antes de subir a API
-- O schema do banco passa a ser atualizado pelas migrations do Alembic a cada deploy
-- URL final: `https://petmind.onrender.com/docs`
-
-### Variáveis de ambiente no Render
-
-| Variável | Origem | Valor |
-|----------|--------|-------|
-| `DATABASE_URL` | Automático (linked database) | — |
-| `GROQ_API_KEY` | Manual | sua chave |
-| `GROQ_MODEL` | `render.yaml` | `llama-3.3-70b-versatile` |
-| `FRONTEND_URL` | Manual | `https://webpetmind.vercel.app` |
-| `CORS_ALLOW_ORIGINS` | Manual/opcional | origens extras separadas por vírgula |
-| `ENABLE_ADMIN_BOOTSTRAP` | Manual (teste) | `true` para liberar criação do primeiro admin |
-| `ADMIN_BOOTSTRAP_KEY` | Manual/opcional | chave exigida no payload de criação de admin |
-
-### Bootstrap de Administrador (ambiente de teste)
-
-- Endpoint de status para a tela decidir se mostra a opção de criar admin: `GET /auth/admin-bootstrap/status`
-- Endpoint de criação do primeiro admin: `POST /auth/register-admin`
-- Regras:
-  - Só funciona com `ENABLE_ADMIN_BOOTSTRAP=true`
-  - Se `ADMIN_BOOTSTRAP_KEY` estiver definida, o payload deve incluir `chave_bootstrap`
-  - Após existir um admin, o endpoint retorna `409` e a criação de novos admins deve ser feita por `/admin/usuarios/admin`
-
-Payload exemplo:
-
-```json
-{
-  "nome": "Admin Teste",
-  "email": "admin.teste@petmind.dev",
-  "senha": "12345678",
-  "chave_bootstrap": "opcional-se-configurada"
-}
-```
-
-### Acessos de teste (reset completo)
-
-Para apagar todos os cadastros/login do backend e recriar somente 1 usuário comum + 1 administrador:
+A API roda num container (veja o `Dockerfile`). Na subida, as migrations do Alembic
+são aplicadas automaticamente. O banco é um Postgres gerenciado (ex.: Neon).
 
 ```bash
-python -m app.seeds.reset_demo_acessos
+gcloud run deploy petmind-api \
+  --source . \
+  --region southamerica-east1 \
+  --allow-unauthenticated \
+  --set-env-vars DEMO_MODE=true,CORS_ALLOW_ORIGINS=https://petmind.pages.dev \
+  --set-secrets SECRET_KEY=petmind-secret-key:latest,DATABASE_URL=petmind-database-url:latest,GROQ_API_KEY=petmind-groq-key:latest
 ```
 
-Credenciais criadas pelo comando:
-
-- Usuário comum: `teste@teste.com` / `12345678`
-- Administrador: `admin@admin.com` / `12345678`
-
-### Notas importantes
-
-- **Plano free do Render**: o serviço hiberna após 15 min de inatividade — o primeiro request pode demorar ~30s para "acordar".
-- **Banco free**: limite de 1 GB de armazenamento e expira após 90 dias sem uso.
-- O `render.yaml` já corrige automaticamente a URL `postgres://` → `postgresql://` (necessário para SQLAlchemy).
-- Como o deploy roda o pré-start de Alembic, mantenha a pasta `migrations/` versionada no repositório.
-
-# Petmind
+| Variável | Obrigatória | Descrição |
+|----------|-------------|-----------|
+| `DATABASE_URL` | sim | Postgres (Neon: com `?sslmode=require`) |
+| `SECRET_KEY` | sim em produção | Assina os tokens de login |
+| `GROQ_API_KEY` | para IA | Texto da análise de comportamento |
+| `CORS_ALLOW_ORIGINS` | não | Origens extras do front, separadas por vírgula |
+| `DEMO_MODE` | não | `true` cria os dados de demonstração e libera o login de visitante |
+| `ENABLE_ADMIN_BOOTSTRAP` | não | `true` libera criar admin pela tela (padrão: desligado) |
