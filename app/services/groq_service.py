@@ -1,19 +1,28 @@
 """
-Serviço de integração com a Groq API.
+Análise de comportamento dos pets.
 
-Responsável por analisar comportamentos dos pets usando IA
-e gerar insights sobre padrões e anomalias.
+Divisão de responsabilidades:
+- Médias, tendências, estado predominante, confiança e alertas são calculados
+  aqui em Python, com regras fixas: os mesmos registros geram sempre os mesmos números.
+- A IA (Groq) só escreve o diagnóstico e a recomendação em linguagem natural.
+  Se ela falhar, o texto vem de um modelo fixo e a análise continua funcionando.
 """
 
 import json
+import logging
 import os
 import re
-from typing import Literal, TypedDict, cast
+import statistics
+from typing import Literal, TypedDict
 
 from dotenv import load_dotenv
 from groq import Groq
 
+from app.services.emocao_service import calcular_estado_emocional
+
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -54,11 +63,133 @@ class AnaliseComportamentoDict(TypedDict):
 CampoAnalise = Literal["agitacao", "sono", "apetite", "humor"]
 
 
+CAMPOS: tuple[CampoAnalise, ...] = ("agitacao", "sono", "apetite", "humor")
+NOMES_CAMPOS = {
+    "agitacao": "agitação",
+    "sono": "sono",
+    "apetite": "apetite",
+    "humor": "humor",
+}
+
+
+def calcular_tendencias(registros: list[RegistroAnalise]) -> TendenciasAnalise:
+    """Compara a primeira e a segunda metade dos registros."""
+    total = len(registros)
+    metade = max(1, total // 2)
+    primeira = registros[:metade]
+    segunda = registros[metade:] if total > 1 else registros
+
+    def tendencia(campo: CampoAnalise) -> str:
+        media_p = sum(r[campo] for r in primeira) / len(primeira)
+        media_s = sum(r[campo] for r in segunda) / len(segunda)
+        diff = media_s - media_p
+        if diff > 0.4:
+            return "piorando" if campo == "agitacao" else "melhorando"
+        if diff < -0.4:
+            return "melhorando" if campo == "agitacao" else "piorando"
+        return "estável"
+
+    return {
+        "agitacao": tendencia("agitacao"),
+        "sono": tendencia("sono"),
+        "apetite": tendencia("apetite"),
+        "humor": tendencia("humor"),
+    }
+
+
+def calcular_confianca(registros: list[RegistroAnalise]) -> int:
+    """
+    Confiança da análise (60 a 98): cresce com a quantidade de registros
+    e com a consistência deles (menor variação entre um registro e outro).
+    """
+    volume = min(len(registros), 10) * 2  # até +20
+    if len(registros) > 1:
+        desvio_medio = sum(
+            statistics.pstdev([r[c] for r in registros]) for c in CAMPOS
+        ) / len(CAMPOS)
+        consistencia = max(0.0, 1 - desvio_medio / 2)
+    else:
+        consistencia = 0.5
+    return max(60, min(98, round(60 + volume + consistencia * 18)))
+
+
+def calcular_alertas(medias: MediasAnalise) -> list[str]:
+    """Alerta quando a média de um campo foge da faixa normal (2,5 a 4,0)."""
+    alertas: list[str] = []
+    for campo in CAMPOS:
+        media = medias[campo]
+        nome = NOMES_CAMPOS[campo]
+        if campo == "agitacao" and media > 4.0:
+            alertas.append(f"Agitação alta: média {media}/5 nos registros.")
+        elif campo != "agitacao" and media < 2.5:
+            alertas.append(
+                f"{nome.capitalize()} baixo: média {media}/5 nos registros."
+            )
+    return alertas[:3]
+
+
+def extrair_eventos(registros: list[RegistroAnalise]) -> set[str]:
+    """Extrai eventos codificados em observações no formato EVENTOS:id1,id2."""
+    eventos: set[str] = set()
+    for registro in registros:
+        obs = str(registro.get("observacoes", "") or "")
+        match = re.search(r"EVENTOS:([^|]+)", obs)
+        if match:
+            eventos.update(ev.strip() for ev in match.group(1).split(",") if ev.strip())
+    return eventos
+
+
+def calcular_metricas(registros: list[RegistroAnalise]) -> AnaliseComportamentoDict:
+    """Calcula toda a parte numérica da análise, sem IA."""
+    total = len(registros)
+    def media(campo: CampoAnalise) -> float:
+        return round(sum(int(r[campo]) for r in registros) / total, 1)
+
+    medias: MediasAnalise = {
+        "agitacao": media("agitacao"),
+        "sono": media("sono"),
+        "apetite": media("apetite"),
+        "humor": media("humor"),
+    }
+    estado = calcular_estado_emocional(
+        round(medias["agitacao"]),
+        round(medias["sono"]),
+        round(medias["apetite"]),
+        round(medias["humor"]),
+    )
+    return {
+        "estado_predominante": estado,
+        "confianca": calcular_confianca(registros),
+        "medias": medias,
+        "tendencias": calcular_tendencias(registros),
+        "alertas": calcular_alertas(medias),
+        "diagnostico": "",
+        "recomendacao": "",
+    }
+
+
+def texto_padrao(nome_pet: str, metricas: AnaliseComportamentoDict) -> tuple[str, str]:
+    """Diagnóstico e recomendação fixos, usados quando a IA não responde."""
+    estado = metricas["estado_predominante"].replace("_", " ")
+    medias = metricas["medias"]
+    diagnostico = (
+        f"{nome_pet} está predominantemente {estado} "
+        f"(humor médio {medias['humor']}/5)."
+    )
+    if metricas["alertas"]:
+        recomendacao = (
+            "Observe os pontos de alerta e, se persistirem, consulte um veterinário."
+        )
+    else:
+        recomendacao = "Continue registrando a rotina diariamente."
+    return diagnostico, recomendacao
+
+
 class GroqService:
-    """Serviço de IA para análise de comportamento de pets."""
+    """Serviço de análise de comportamento de pets."""
 
     def __init__(self) -> None:
-        self.client = Groq(api_key=GROQ_API_KEY)
+        self.client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
         self.model = GROQ_MODEL
 
     def verificar_conexao(self) -> bool:
@@ -71,202 +202,63 @@ class GroqService:
         especie: str,
         registros: list[RegistroAnalise],
     ) -> AnaliseComportamentoDict:
-        """
-        Analisa registros e retorna JSON estruturado com métricas reais.
-        Retorna dict com estado, confiança, médias, tendências, alertas,
-        diagnóstico e recomendação.
-        """
-        # Calcular médias reais antes de enviar pra Groq
-        total = len(registros)
-        media_agitacao = round(sum(int(r["agitacao"]) for r in registros) / total, 1)
-        media_sono = round(sum(r["sono"] for r in registros) / total, 1)
-        media_apetite = round(sum(r["apetite"] for r in registros) / total, 1)
-        media_humor = round(sum(r["humor"] for r in registros) / total, 1)
+        """Métricas calculadas em Python + texto escrito pela IA."""
+        analise = calcular_metricas(registros)
+        diagnostico, recomendacao = texto_padrao(nome_pet, analise)
 
-        # Calcular tendências comparando primeira e segunda metade
-        metade = max(1, total // 2)
-        primeira = registros[:metade]
-        segunda = registros[metade:] if total > 1 else registros
+        eventos = extrair_eventos(registros)
+        texto_ia = self._escrever_texto(nome_pet, especie, analise, eventos)
+        if texto_ia:
+            diagnostico = texto_ia.get("diagnostico") or diagnostico
+            recomendacao = texto_ia.get("recomendacao") or recomendacao
 
-        def tendencia(campo: CampoAnalise) -> str:
-            media_p = sum(r[campo] for r in primeira) / len(primeira)
-            media_s = sum(r[campo] for r in segunda) / len(segunda)
-            diff = media_s - media_p
-            if diff > 0.4:
-                return "piorando" if campo in ["agitacao"] else "melhorando"
-            if diff < -0.4:
-                return "melhorando" if campo in ["agitacao"] else "piorando"
-            return "estável"
+        analise["diagnostico"] = str(diagnostico)[:200]
+        analise["recomendacao"] = str(recomendacao)[:200]
+        return analise
 
-        tendencias: TendenciasAnalise = {
-            "agitacao": tendencia("agitacao"),
-            "sono": tendencia("sono"),
-            "apetite": tendencia("apetite"),
-            "humor": tendencia("humor"),
-        }
-
-        # Extrai eventos codificados em observacoes no formato EVENTOS:id1,id2
-        eventos_unicos: set[str] = set()
-        for registro in registros:
-            obs = str(registro.get("observacoes", "") or "")
-            match = re.search(r"EVENTOS:([^|]+)", obs)
-            if not match:
-                continue
-            ids = [ev.strip() for ev in match.group(1).split(",") if ev.strip()]
-            eventos_unicos.update(ids)
-
-        contexto_eventos = ""
-        if eventos_unicos:
-            eventos_lista = ", ".join(sorted(eventos_unicos))
-            contexto_eventos = (
-                f"\nEVENTOS DO PERÍODO:\n"
-                f"- Eventos registrados: {eventos_lista}\n"
-            )
-            if "jogo_copa" in eventos_unicos or "torcida_casa" in eventos_unicos:
-                contexto_eventos += (
-                    "- Observação: houve jogos da Copa durante o período analisado.\n"
-                )
-            if "sozinho" in eventos_unicos:
-                contexto_eventos += (
-                    "- Observação: o pet ficou sozinho em alguns momentos.\n"
-                )
-            if any(
-                e in eventos_unicos for e in ["reveillon", "festa_junina", "aniversario"]
-            ):
-                contexto_eventos += (
-                    "- Observação: houve festas e barulho no período.\n"
-                )
-            if "tempestade" in eventos_unicos:
-                contexto_eventos += (
-                    "- Observação: houve tempestade/trovões no período.\n"
-                )
-
-        linhas = "\n".join(
-            f"Registro {i+1}: agitação={r['agitacao']}, sono={r['sono']}, "
-            f"apetite={r['apetite']}, humor={r['humor']}"
-            + (f", obs: {r['observacoes']}" if r.get("observacoes") else "")
-            for i, r in enumerate(registros)
-        )
-
-        prompt = f"""Você é um sistema de análise comportamental animal com ML.
-Analise os dados do pet '{nome_pet}' (espécie: {especie}).
-
-DADOS CALCULADOS:
-- Total de registros: {total}
-- Média agitação: {media_agitacao}/5
-- Média sono: {media_sono}/5
-- Média apetite: {media_apetite}/5
-- Média humor: {media_humor}/5
-- Tendências: agitação={tendencias['agitacao']}, sono={tendencias['sono']}, apetite={tendencias['apetite']}, humor={tendencias['humor']}
-
-REGISTROS BRUTOS:
-{linhas}
-{contexto_eventos}
-
-Responda APENAS com um JSON válido, sem texto antes ou depois, sem markdown, sem explicações.
-O JSON deve seguir EXATAMENTE esta estrutura:
-
-{{
-  "estado_predominante": "feliz|agitado|sonolento|com_fome|triste|animado",
-  "confianca": <número inteiro de 60 a 98>,
-  "medias": {{
-    "agitacao": {media_agitacao},
-    "sono": {media_sono},
-    "apetite": {media_apetite},
-    "humor": {media_humor}
-  }},
-  "tendencias": {{
-    "agitacao": "{tendencias['agitacao']}",
-    "sono": "{tendencias['sono']}",
-    "apetite": "{tendencias['apetite']}",
-    "humor": "{tendencias['humor']}"
-  }},
-  "alertas": [
-    "<alerta específico com dados numéricos reais se houver>",
-    "<máximo 3 alertas, apenas se média < 2.5 ou > 4.0>"
-  ],
-  "diagnostico": "<frase curta e direta, máximo 15 palavras, com dado numérico>",
-  "recomendacao": "<ação objetiva e específica, máximo 15 palavras>"
-}}
-
-Regras obrigatórias:
-- estado_predominante deve ser um dos 6 valores aceitos
-- alertas só aparecem se realmente houver algo fora do normal
-- diagnostico e recomendacao devem ser CURTOS e OBJETIVOS
-- confianca deve refletir a consistência dos dados (dados consistentes = confiança alta)
-- NUNCA use markdown, NUNCA escreva texto fora do JSON"""
-
-        resposta = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=600,
-            temperature=0.2,
-        )
-
-        conteudo = resposta.choices[0].message.content
-        if conteudo is None:
-            return self._analise_fallback(
-                nome_pet,
-                media_agitacao,
-                media_sono,
-                media_apetite,
-                media_humor,
-                tendencias,
-            )
-
-        # Limpar possível markdown do modelo
-        conteudo = conteudo.strip()
-        if conteudo.startswith("```"):
-            conteudo = conteudo.split("```")[1]
-            if conteudo.startswith("json"):
-                conteudo = conteudo[4:]
-
-        try:
-            return cast(AnaliseComportamentoDict, json.loads(conteudo))
-        except Exception:
-            return self._analise_fallback(
-                nome_pet,
-                media_agitacao,
-                media_sono,
-                media_apetite,
-                media_humor,
-                tendencias,
-            )
-
-    def _analise_fallback(
+    def _escrever_texto(
         self,
         nome_pet: str,
-        media_agitacao: float,
-        media_sono: float,
-        media_apetite: float,
-        media_humor: float,
-        tendencias: TendenciasAnalise,
-    ) -> AnaliseComportamentoDict:
-        """Fallback caso o JSON da Groq venha malformado."""
-        estado = "feliz"
-        if media_agitacao >= 4:
-            estado = "agitado"
-        elif media_humor <= 2:
-            estado = "triste"
-        elif media_sono <= 2:
-            estado = "sonolento"
-        elif media_apetite <= 2:
-            estado = "com_fome"
+        especie: str,
+        analise: AnaliseComportamentoDict,
+        eventos: set[str],
+    ) -> dict[str, str] | None:
+        """Pede à IA só o diagnóstico e a recomendação. Retorna None se falhar."""
+        if self.client is None:
+            return None
 
-        return {
-            "estado_predominante": estado,
-            "confianca": 70,
-            "medias": {
-                "agitacao": media_agitacao,
-                "sono": media_sono,
-                "apetite": media_apetite,
-                "humor": media_humor,
-            },
-            "tendencias": tendencias,
-            "alertas": [],
-            "diagnostico": f"{nome_pet} apresenta padrão estável nos registros.",
-            "recomendacao": "Continue monitorando diariamente.",
-        }
+        contexto_eventos = (
+            f"Eventos no período: {', '.join(sorted(eventos))}.\n" if eventos else ""
+        )
+        prompt = f"""Você é um assistente de comportamento animal.
+Os números abaixo já foram calculados e NÃO devem ser alterados nem recalculados.
+
+Pet: {nome_pet} ({especie})
+Estado predominante: {analise['estado_predominante']}
+Médias (1 a 5): {json.dumps(analise['medias'], ensure_ascii=False)}
+Tendências: {json.dumps(analise['tendencias'], ensure_ascii=False)}
+Alertas: {json.dumps(analise['alertas'], ensure_ascii=False)}
+{contexto_eventos}
+Escreva em português, de forma direta:
+- "diagnostico": uma frase de no máximo 15 palavras citando um dado numérico acima;
+- "recomendacao": uma ação objetiva de no máximo 15 palavras.
+
+Responda somente com um JSON: {{"diagnostico": "...", "recomendacao": "..."}}"""
+
+        try:
+            resposta = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                temperature=0,
+                response_format={"type": "json_object"},
+            )
+            conteudo = resposta.choices[0].message.content or "{}"
+            dados = json.loads(conteudo)
+            return dados if isinstance(dados, dict) else None
+        except Exception:  # rede, limite de uso, modelo indisponível, JSON inválido
+            logger.exception("Falha ao gerar texto da análise com a Groq")
+            return None
 
 
 def get_groq_service() -> GroqService:

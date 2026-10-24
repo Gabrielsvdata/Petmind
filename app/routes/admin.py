@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.demo import eh_conta_demo
 from app.dependencies.admin import get_usuario_admin
 from app.models.pet import Pet, RegistroComportamento
 from app.models.user import Usuario
@@ -111,6 +112,10 @@ def alterar_papel(
     usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    if eh_conta_demo(usuario):
+        raise HTTPException(
+            status_code=403, detail="Contas de demonstração não podem ser alteradas"
+        )
     usuario.papel = request.papel
     db.commit()
     return {"mensagem": f"Papel atualizado para '{request.papel}'"}
@@ -124,6 +129,10 @@ def deletar_usuario(
     usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    if eh_conta_demo(usuario):
+        raise HTTPException(
+            status_code=403, detail="Contas de demonstração não podem ser removidas"
+        )
     db.delete(usuario)
     db.commit()
     return {"mensagem": "Usuário removido com sucesso"}

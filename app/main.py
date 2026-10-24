@@ -1,3 +1,4 @@
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -26,6 +27,7 @@ origens_permitidas = [
     "http://localhost:4173",
     "http://127.0.0.1:4173",
     "https://webpetmind.vercel.app",
+    "https://petmind.pages.dev",
 ]
 
 origens_env = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
@@ -60,9 +62,21 @@ app.include_router(pets.roteador)
 
 @app.on_event("startup")
 def preparar_schema() -> None:
-    """Garante que o schema esteja alinhado antes de atender requests."""
+    """Garante o schema e, em modo demonstração, os dados de exemplo."""
     if auto_migrate_enabled():
         ensure_schema_ready()
+    if os.getenv("DEMO_MODE", "false").strip().lower() == "true":
+        from app.database import SessionLocal
+        from app.seeds.demo_seed import popular_demo
+
+        db = SessionLocal()
+        try:
+            popular_demo(db)
+        except Exception:
+            db.rollback()
+            logging.getLogger(__name__).exception("Falha ao criar dados de demo")
+        finally:
+            db.close()
 
 
 @app.get("/")
