@@ -14,5 +14,6 @@ ENV PYTHONUNBUFFERED=1 \
 EXPOSE 8080
 
 # Na subida, as migrations do Alembic são aplicadas (PETMIND_AUTO_MIGRATE_ON_STARTUP).
-# O Cloud Run informa a porta pela variável PORT.
-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers
+# O Cloud Run informa a porta pela variável PORT e termina o HTTPS no proxy dele;
+# --forwarded-allow-ips faz os redirecionamentos saírem com https.
+CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips '*'
