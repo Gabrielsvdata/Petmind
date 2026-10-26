@@ -28,6 +28,7 @@ origens_permitidas = [
     "http://127.0.0.1:4173",
     "https://webpetmind.vercel.app",
     "https://petmind.pages.dev",
+    "https://petmind-front.gabrielsilvanovieira7.workers.dev",
 ]
 
 origens_env = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
