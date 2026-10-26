@@ -13,7 +13,7 @@ import logging
 import os
 import re
 import statistics
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -25,7 +25,50 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "").strip()
+
+# O Groq aposenta modelos com frequência (o LLaMA 3.3 saiu em 2026). A API usa o
+# primeiro desta lista que estiver disponível para a chave; GROQ_MODEL força um.
+MODELOS_PREFERIDOS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+    "qwen/qwen3.6-27b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+_modelos_disponiveis: set[str] | None = None
+
+
+def escolher_modelo(client: Any) -> str:
+    """Primeiro modelo preferido liberado para a chave (consulta /models uma vez)."""
+    global _modelos_disponiveis
+    if GROQ_MODEL:
+        return GROQ_MODEL
+    if _modelos_disponiveis is None:
+        try:
+            _modelos_disponiveis = {m.id for m in client.models.list().data}
+        except Exception:
+            logger.warning("Não foi possível listar os modelos do Groq")
+            return MODELOS_PREFERIDOS[0]
+    return next(
+        (m for m in MODELOS_PREFERIDOS if m in _modelos_disponiveis),
+        MODELOS_PREFERIDOS[0],
+    )
+
+
+def esforco_raciocinio(modelo: str) -> str | None:
+    """Modelos com raciocínio gastam tokens pensando; aqui só interessa a resposta."""
+    if modelo.startswith("openai/gpt-oss"):
+        return "low"
+    if modelo.startswith("qwen/"):
+        return "none"
+    return None
+
+
+def sem_raciocinio(texto: str) -> str:
+    """Remove o bloco <think>...</think> que alguns modelos põem antes da resposta."""
+    return re.sub(r"<think>.*?</think>", "", texto, flags=re.S).strip()
 
 
 class RegistroAnalise(TypedDict):
@@ -190,7 +233,6 @@ class GroqService:
 
     def __init__(self) -> None:
         self.client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-        self.model = GROQ_MODEL
 
     def verificar_conexao(self) -> bool:
         """Verifica se a API key está configurada."""
@@ -246,14 +288,26 @@ Escreva em português, de forma direta:
 Responda somente com um JSON: {{"diagnostico": "...", "recomendacao": "..."}}"""
 
         try:
-            resposta = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=200,
-                temperature=0,
-                response_format={"type": "json_object"},
-            )
-            conteudo = resposta.choices[0].message.content or "{}"
+            modelo = escolher_modelo(self.client)
+            parametros: dict[str, Any] = {
+                "model": modelo,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 600,
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            }
+            esforco = esforco_raciocinio(modelo)
+            try:
+                resposta = self.client.chat.completions.create(
+                    **parametros,
+                    extra_body={"reasoning_effort": esforco} if esforco else None,
+                )
+            except Exception as erro:
+                # Modelo que não aceita o ajuste de raciocínio: tenta sem ele
+                if not esforco or getattr(erro, "status_code", None) != 400:
+                    raise
+                resposta = self.client.chat.completions.create(**parametros)
+            conteudo = sem_raciocinio(resposta.choices[0].message.content or "{}")
             dados = json.loads(conteudo)
             return dados if isinstance(dados, dict) else None
         except Exception:  # rede, limite de uso, modelo indisponível, JSON inválido
